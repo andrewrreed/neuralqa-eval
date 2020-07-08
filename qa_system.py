@@ -282,3 +282,114 @@ class QASystem:
 
 
 
+class PassageRanker:
+    '''
+    Passage ranking utility class that optionally:
+        1. Takes in search results from Elasticsearch-dsl
+        2. Parses out each paragraph as a passage
+        3. Builds sparse TF-IDF vectors for each passage + the input question
+        4. Computes cosine similarity for each passage vs. question vector
+        5. Saves most similar passage records
+
+    Note - If n_passages is None, no chunking or ranking is performed and whole documents
+            are saved as is.
+
+    Args:
+        question_text (str)
+        ex_restuls (elasticsearch_dsl.utils.AttrList)
+        n_passages (int) - number of most similar passages save
+
+    '''
+    
+    def __init__(self, question_text, es_results, n_passages):
+        
+        self.start_time = time.time()
+        self.question_text = question_text
+        self.docs, self.passages_df = self.format_input(es_results)
+        self.n_passages = n_passages
+        
+        if self.n_passages:
+            self.calculate_tfidf_similarity()
+            self.format_passage_output()
+        else:
+            self.format_document_output()
+        
+        self.end_time = time.time()
+        self.took = (self.end_time - self.start_time)*1000 #to milliseconds
+
+    
+    def format_document_output(self):
+        '''
+        If no passage ranking is desired, simply save all full docs for processing
+        by the Reader
+
+        '''
+        self.output_docs = [{k:v for k, v in rec.items() if k in ['id', 'title', 'text']} \
+                            for rec in self.docs]
+    
+    def format_passage_output(self):
+        '''
+        Takes the top N most similar passages and formats them for processing
+        by the Reader.
+        
+        '''
+        most_sim = self.passages_df.sort_values('sim_score', ascending=False)\
+                    .reset_index(drop=True)\
+                    .loc[:self.n_passages-1, ['id', 'title', 'text']]
+        
+        self.output_docs = most_sim.to_dict(orient='records')
+        
+        
+    def calculate_tfidf_similarity(self):
+        '''
+        Uses the passages_df to vectorize each passage and the question, then
+        computes cosine similarity of those sparse vectors and saves them back into
+        passages_df attribute
+        
+        '''
+        vectorizer = TfidfVectorizer(ngram_range=(1,3), stop_words='english')
+        
+        combined = self.passages_df['text'].append(pd.Series(self.question_text),
+                                                           ignore_index=True)
+
+        passage_vecs, question_vec = np.split(vectorizer.fit_transform(combined).toarray(),[-1])
+        
+        sim_vec = cosine_similarity(passage_vecs, question_vec)
+
+        self.passages_df['sim_score']  = sim_vec.flatten()
+        
+        
+    @staticmethod
+    def format_input(es_results):
+        '''
+        Take raw results from Elasticsearch-dsl and format as Dataframe
+        
+        '''
+        # format as dicts
+        docs = []
+        for rec in es_results:
+            doc = {
+                'id': rec.meta.id,
+                'score': rec.meta.score,
+                'text': rec.text, 
+                'title': rec.title}
+            
+            doc['passages'] = doc['text'].split('\n\n')
+            docs.append(doc)
+        
+        # formate as dataframe
+        passages_recs = []
+        
+        for doc in docs:
+            for i, passage in enumerate(doc['passages']):
+                
+                if i == 0 or passage in ['\n', '', ' ']:
+                    # skip article title
+                    continue
+                    
+                rec = (doc['id'], doc['title'], i, passage)
+                passages_recs.append(rec)
+                
+        passages_df = pd.DataFrame(data=passages_recs, columns=['id', 'title', 'passage_index', 'text'])
+        
+        return docs, passages_df
