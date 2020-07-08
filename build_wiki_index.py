@@ -15,9 +15,7 @@ os.system("curl -O https://raw.githubusercontent.com/attardi/wikiextractor/maste
 if not os.path.exists('data/'):
     os.makedirs('data/')
 
-os.chdir('data')
-os.system('wget http://download.wikimedia.org/wiki/latest/wiki-latest-pages-articles.xml.bz2')
-os.chdir('../')
+os.system('cd data && wget http://download.wikimedia.org/wiki/latest/wiki-latest-pages-articles.xml.bz2')
 
 # extract Wikipedia dump
 os.system("python WikiExtractor.py -o data/. --json enwiki-latest-pages-articles.xml.bz2")
