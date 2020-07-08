@@ -21,6 +21,8 @@ def convert_nq_dev_to_squad_format(filepath):
             simp_example = simplify_nq_example(json.loads(line.decode('utf-8')))
             answers, yes_no_flag = get_short_answers_from_span(simp_example)
 
+            answers = [{'text':ans} for ans in answers]
+
             if yes_no_flag:
                 # exclude questions with any annotation indicating yes/no question
                 yes_no_count += 1
@@ -50,6 +52,7 @@ def get_short_answers_from_span(simplified_example):
             of short answers
         2. Answers with many tokens often resemble extractive snippets rather than canonical answers, 
             so we discard answers with more than 5 tokens. (https://arxiv.org/pdf/1906.00300.pdf)
+            Also, the average short answer length in SQuAD train is 3.16 tokens, so this is reasonable.
     
     '''
     
